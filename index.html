@@ -35,6 +35,8 @@ h1{font-size:17px;margin:0;font-weight:700}
 .big small{font-size:28px;font-weight:700;margin-left:4px;letter-spacing:0;color:var(--sub)}
 .bmi{margin-top:6px;font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
 .bmi .cat{font-size:13px;font-weight:600;color:var(--sub);margin-left:8px}
+.bmr{margin-top:4px;font-size:15px;font-weight:600;color:var(--sub);font-variant-numeric:tabular-nums}
+.bmr b{color:var(--ink)}
 .bmi-link{margin-top:8px;border:none;background:none;color:var(--accent);font-size:13px;font-family:inherit;padding:4px}
 .seg{display:flex;gap:8px}
 .seg label{flex:1;text-align:center;border:1px solid var(--line);border-radius:12px;padding:11px 4px;font-size:14px;cursor:pointer}
@@ -480,13 +482,24 @@ function parseWeight(t){
 
 /* ---------- BMI・個人設定 ---------- */
 function bmiCat(b){return b<18.5?'低体重':b<25?'普通体重':b<30?'肥満(1度)':b<35?'肥満(2度)':b<40?'肥満(3度)':'肥満(4度)';}
+// 基礎代謝: Mifflin-St Jeor式(「回答しない」は男女の中間値)
+function calcBmr(kg,p){
+  if(!p||!p.height||!p.age||!p.sex)return null;
+  const off=p.sex==='male'?5:p.sex==='female'?-161:-78;
+  return Math.round(10*kg+6.25*p.height-5*p.age+off);
+}
 function renderBmi(last){
-  const box=$('bmi'),h=state.profile&&state.profile.height;
-  if(!h){box.innerHTML='<button class="bmi-link" id="bmiSet">身長を設定するとBMIを表示します</button>';
+  const box=$('bmi'),p=state.profile||{},h=p.height;
+  if(!h){box.innerHTML='<button class="bmi-link" id="bmiSet">性別・身長・年齢を設定するとBMIと基礎代謝を表示します</button>';
     $('bmiSet').addEventListener('click',openProfile);return;}
   if(!last){box.textContent='';return;}
   const m=h/100,b=last.kg/(m*m);
-  box.innerHTML='BMI '+b.toFixed(1)+'<span class="cat">'+bmiCat(b)+'</span>';
+  let html='BMI '+b.toFixed(1)+'<span class="cat">'+bmiCat(b)+'</span>';
+  const bmr=calcBmr(last.kg,p);
+  if(bmr!=null)html+='<div class="bmr">基礎代謝 <b>'+bmr.toLocaleString('ja-JP')+'</b> kcal/日</div>';
+  else html+='<div><button class="bmi-link" id="bmiSet">性別・年齢を設定すると基礎代謝を表示します</button></div>';
+  box.innerHTML=html;
+  const l=$('bmiSet');if(l)l.addEventListener('click',openProfile);
 }
 function openProfile(){
   const p=state.profile||{};
