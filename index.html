@@ -144,6 +144,7 @@ svg text{fill:var(--sub);font-size:10px}
       <button class="goal-edit" id="goalEdit">目標を設定</button>
     </div>
     <div class="goal-kcal" id="goalKcal"></div>
+    <div class="bmr" id="goalBmr"></div>
     <div class="bar"><div id="goalBar"></div></div>
     <div class="goal-sub"><span id="goalStart"></span><span id="goalTarget"></span></div>
   </div>
@@ -239,6 +240,7 @@ function render(){
     $('delta').innerHTML='前回比 <b class="'+cls+'">'+(d>0?'+':'')+d.toFixed(1)+' kg</b>';
   }else{ $('delta').textContent=last?(fmtFull(last.ts)+' 記録'):'まだ記録がありません'; }
   renderBmi(last);
+  renderBmr(last);
   renderGoal(recs);
   renderChart(recs);
   renderRows(recs);
@@ -495,11 +497,16 @@ function renderBmi(last){
   if(!last){box.textContent='';return;}
   const m=h/100,b=last.kg/(m*m);
   let html='BMI '+b.toFixed(1)+'<span class="cat">'+bmiCat(b)+'</span>';
-  const bmr=calcBmr(last.kg,p);
-  if(bmr!=null)html+='<div class="bmr">基礎代謝 <b>'+bmr.toLocaleString('ja-JP')+'</b> kcal/日</div>';
-  else html+='<div><button class="bmi-link" id="bmiSet">性別・年齢を設定すると基礎代謝を表示します</button></div>';
   box.innerHTML=html;
-  const l=$('bmiSet');if(l)l.addEventListener('click',openProfile);
+}
+function renderBmr(last){
+  const box=$('goalBmr'),p=state.profile||{};
+  box.innerHTML='';
+  if(!last||!p.height)return;
+  const bmr=calcBmr(last.kg,p);
+  if(bmr!=null)box.innerHTML='基礎代謝 <b>'+bmr.toLocaleString('ja-JP')+'</b> kcal/日';
+  else{box.innerHTML='<button class="bmi-link" id="bmrSet">性別・年齢を設定すると基礎代謝を表示します</button>';
+    $('bmrSet').addEventListener('click',openProfile);}
 }
 function openProfile(){
   const p=state.profile||{};
