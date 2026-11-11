@@ -95,7 +95,9 @@ svg text{fill:var(--sub);font-size:10px}
 .modal.show{display:flex}
 .sheet{background:var(--card);width:100%;max-width:480px;border-radius:24px 24px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom));max-height:92vh;overflow:auto}
 .sheet h3{margin:0 0 12px;font-size:18px}
-.preview{width:100%;max-height:150px;object-fit:contain;border-radius:12px;background:#000;display:none;margin-bottom:10px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:-2px 0 10px}
+.chip{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:14px;padding:6px 14px;font-size:15px;font-weight:600;font-family:inherit}
+.preview{width:100%;max-height:230px;cursor:crosshair;object-fit:contain;border-radius:12px;background:#000;display:none;margin-bottom:10px}
 .status{font-size:13px;color:var(--sub);margin-bottom:10px;min-height:18px}
 .status.err{color:var(--warn)}
 .numrow{display:flex;align-items:baseline;gap:8px;margin-bottom:12px}
@@ -169,6 +171,7 @@ svg text{fill:var(--sub);font-size:10px}
     <h3>こちらの数値を記録しますか？</h3>
     <canvas id="preview" class="preview"></canvas>
     <div class="status" id="ocrStatus"></div>
+    <div class="chips" id="chips"></div>
     <div class="numrow"><input id="rawInput" type="number" inputmode="decimal" step="0.1" min="20" max="300" placeholder="00.0"><span>kg</span></div>
     <label class="check"><input type="checkbox" id="clothes"><span>衣服を着ている（−1.0kg で計算）</span></label>
     <div class="result" id="result"></div>
@@ -389,44 +392,85 @@ $('saveBtn').addEventListener('click',()=>{
 });
 
 $('camBtn').addEventListener('click',()=>$('cam').click());
-$('manualBtn').addEventListener('click',()=>{discardPhoto();openConfirm(null,'体重を入力してください',false);setTimeout(()=>$('rawInput').focus(),50);});
+$('manualBtn').addEventListener('click',()=>{discardPhoto();setChips([]);openConfirm(null,'体重を入力してください',false);setTimeout(()=>$('rawInput').focus(),50);});
 
+let busy=false;
 $('cam').addEventListener('change',async e=>{
   const f=e.target.files&&e.target.files[0];if(!f)return;
   discardPhoto();
   $('cam').value='';
   openConfirm(null,'<span class="spin"></span>数値を読み取り中…',false);
+  setChips([]);
   let bmp;
   try{ bmp=await loadBitmap(f); }catch(err){ setStatus('写真を読み込めませんでした。数値を手入力してください。',true);return; }
-  // プレビュー用(カラー)とOCR用(白黒強調)を作成。どちらもメモリ上のみ。
+  // プレビュー(カラー)。写真はメモリ上のみで、保存しない。
   const MAX=1400, sc=Math.min(1,MAX/Math.max(bmp.w,bmp.h));
   const w=Math.round(bmp.w*sc),h=Math.round(bmp.h*sc);
   const pv=$('preview');pv.width=w;pv.height=h;pv.style.display='block';
   pv.getContext('2d').drawImage(bmp.src,0,0,w,h);
-  const oc=document.createElement('canvas');oc.width=w;oc.height=h;
-  const octx=oc.getContext('2d');octx.drawImage(bmp.src,0,0,w,h);
-  enhance(octx,w,h,false);
-  pending={ocrCanvas:oc};
-  if(bmp.close)bmp.close();
-  const token=pending;
+  const token={};pending=token;
+  busy=true;
   try{
-    let v=await runOcr(oc);
-    if(v==null){ // 反転でもう一度
-      enhance(octx,w,h,true);
-      v=await runOcr(oc);
+    const cands=new Map();
+    for(const mode of ['gray','bin']){
+      if(pending!==token)return;
+      const oc=makeCanvas(pv,0,0,w,h,w,h,mode);
+      addCands(cands,await runOcr(oc,'11'));
+      oc.width=0;oc.height=0;
     }
-    if(pending!==token)return; // 途中でキャンセルされた
-    if(v!=null){
-      $('rawInput').value=v.toFixed(1);updateResult();
-      setStatus('読み取り結果です。違う場合は数字を直してください。',false);
-    }else{
-      setStatus('数値を読み取れませんでした。手入力してください。',true);
+    if(!cands.size&&pending===token){
+      const oc=makeCanvas(pv,0,0,w,h,w,h,'inv');
+      addCands(cands,await runOcr(oc,'11'));oc.width=0;oc.height=0;
     }
+    if(pending!==token)return;
+    applyCands(rankCands(cands),'読み取り結果です。');
   }catch(err){
     if(pending!==token)return;
     setStatus('自動読み取りが使えませんでした（通信または環境の制限）。数値を手入力してください。',true);
-  }
+  }finally{busy=false;}
 });
+
+// 数字が違うとき：体重計の表示部分をタップ → その周辺だけ読み取り直す
+$('preview').addEventListener('click',async ev=>{
+  if(!pending||busy)return;
+  const pv=$('preview'),r=pv.getBoundingClientRect();
+  const k=Math.min(r.width/pv.width,r.height/pv.height);
+  const ox=r.left+(r.width-pv.width*k)/2, oy=r.top+(r.height-pv.height*k)/2;
+  const cx=(ev.clientX-ox)/k, cy=(ev.clientY-oy)/k;
+  if(cx<0||cy<0||cx>pv.width||cy>pv.height)return;
+  const cw=Math.min(pv.width,pv.width*.5), ch=Math.min(pv.height,cw*.5);
+  const sx=Math.max(0,Math.min(pv.width-cw,cx-cw/2)), sy=Math.max(0,Math.min(pv.height-ch,cy-ch/2));
+  const token=pending;busy=true;
+  setStatus('<span class="spin"></span>タップした部分を読み取り中…',false);
+  try{
+    const up=Math.max(1,900/cw), cands=new Map();
+    for(const psm of ['7','6']){
+      const oc=makeCanvas(pv,sx,sy,cw,ch,Math.round(cw*up),Math.round(ch*up),'gray');
+      addCands(cands,await runOcr(oc,psm));oc.width=0;oc.height=0;
+      if(cands.size)break;
+    }
+    if(pending!==token)return;
+    if(cands.size)applyCands(rankCands(cands),'タップした部分の読み取り結果です。');
+    else setStatus('その部分から数字を読み取れませんでした。別の位置をタップするか、手入力してください。',true);
+  }catch(err){
+    if(pending===token)setStatus('読み取りに失敗しました。手入力してください。',true);
+  }finally{busy=false;}
+});
+
+function setChips(list){
+  const box=$('chips');box.innerHTML='';
+  list.forEach(v=>{
+    const b=document.createElement('button');b.type='button';b.className='chip';b.textContent=v.toFixed(1);
+    b.addEventListener('click',()=>{$('rawInput').value=v.toFixed(1);updateResult();});
+    box.appendChild(b);
+  });
+}
+function applyCands(list,prefix){
+  if(!list.length){setStatus('数値を読み取れませんでした。表示部分をタップするか、手入力してください。',true);setChips([]);return;}
+  $('rawInput').value=list[0].toFixed(1);updateResult();
+  setChips(list.slice(1,5));
+  setStatus(prefix+'違う場合は、下の候補を選ぶか、写真の数字の部分をタップして読み取り直せます。',false);
+}
 
 function loadBitmap(file){
   return new Promise((res,rej)=>{
@@ -437,19 +481,22 @@ function loadBitmap(file){
     img.src=url;
   });
 }
-// グレースケール化＋コントラスト伸長(必要なら反転)
-function enhance(ctx,w,h,invert){
-  const id=ctx.getImageData(0,0,w,h),d=id.data;
-  let lo=255,hi=0;const g=new Uint8ClampedArray(w*h);
+// 元画像の一部を切り出してOCR用に加工。mode: gray=グレースケール+コントラスト伸長 / bin=ゆるい二値化 / inv=二値化+反転
+function makeCanvas(src,sx,sy,sw,sh,dw,dh,mode){
+  const c=document.createElement('canvas');c.width=dw;c.height=dh;
+  const ctx=c.getContext('2d');ctx.drawImage(src,sx,sy,sw,sh,0,0,dw,dh);
+  const id=ctx.getImageData(0,0,dw,dh),d=id.data;
+  let lo=255,hi=0;const g=new Uint8ClampedArray(dw*dh);
   for(let i=0,j=0;i<d.length;i+=4,j++){const v=.299*d[i]+.587*d[i+1]+.114*d[i+2];g[j]=v;if(v<lo)lo=v;if(v>hi)hi=v;}
   const span=Math.max(1,hi-lo);
   for(let i=0,j=0;i<d.length;i+=4,j++){
     let v=(g[j]-lo)/span*255;
-    v=v<110?0:v>150?255:(v-110)/40*255; // ゆるい二値化
-    if(invert)v=255-v;
+    if(mode!=='gray'){v=v<110?0:v>150?255:(v-110)/40*255;}
+    if(mode==='inv')v=255-v;
     d[i]=d[i+1]=d[i+2]=v;
   }
   ctx.putImageData(id,0,0);
+  return c;
 }
 function loadTess(){
   if(window.Tesseract)return Promise.resolve();
@@ -465,21 +512,41 @@ async function getWorker(){
   if(worker)return worker;
   await loadTess();
   const w=await Tesseract.createWorker('eng');
-  await w.setParameters({tessedit_char_whitelist:'0123456789.',tessedit_pageseg_mode:'11'});
   worker=w;return w;
 }
-async function runOcr(canvas){
-  const job=(async()=>{const w=await getWorker();const r=await w.recognize(canvas);return parseWeight(r.data.text||'');})();
-  const timeout=new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),45000));
+function allWords(data){
+  if(data.words&&data.words.length)return data.words;
+  const out=[];
+  (data.blocks||[]).forEach(b=>(b.paragraphs||[]).forEach(p=>(p.lines||[]).forEach(l=>(l.words||[]).forEach(w=>out.push(w)))));
+  return out;
+}
+// 数字の「高さ」も返す：体重計の表示は大きい文字なので、ラベルの小さな数字(最大150kg等)より優先できる
+async function runOcr(canvas,psm){
+  const job=(async()=>{
+    const w=await getWorker();
+    await w.setParameters({tessedit_char_whitelist:'0123456789.',tessedit_pageseg_mode:psm});
+    const r=await w.recognize(canvas);
+    return allWords(r.data).map(wd=>{
+      const bb=wd.bbox||{};const hgt=(bb.y1||0)-(bb.y0||0);
+      return {v:parseWeight(wd.text||''),h:hgt,dot:/[.,]/.test(wd.text||'')};
+    }).filter(x=>x.v!=null);
+  })();
+  const timeout=new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),60000));
   return Promise.race([job,timeout]);
 }
 // 例: "65.5" / "655"(小数点が欠けた場合は1桁下げる)
 function parseWeight(t){
-  const c=[];
-  (t.match(/\d{1,3}[.,]\d/g)||[]).forEach(m=>c.push(parseFloat(m.replace(',','.'))));
-  if(!c.length)(t.match(/\d{3,4}/g)||[]).forEach(m=>c.push(parseInt(m,10)/10));
-  const ok=c.filter(v=>v>=20&&v<=300);
-  return ok.length?ok[0]:null;
+  let v=null;
+  const m=t.match(/\d{1,3}[.,]\d/);
+  if(m)v=parseFloat(m[0].replace(',','.'));
+  else{const n=t.match(/\d{3,4}/);if(n)v=parseInt(n[0],10)/10;}
+  return(v!=null&&v>=20&&v<=300)?v:null;
+}
+function addCands(map,list){
+  list.forEach(c=>{const k=c.v.toFixed(1),o=map.get(k);if(!o||c.h>o.h)map.set(k,c);});
+}
+function rankCands(map){
+  return [...map.values()].sort((a,b)=>(b.h-a.h)||((b.dot?1:0)-(a.dot?1:0))).map(c=>c.v);
 }
 
 /* ---------- BMI・個人設定 ---------- */
