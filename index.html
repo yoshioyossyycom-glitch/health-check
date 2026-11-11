@@ -33,6 +33,15 @@ h1{font-size:17px;margin:0;font-weight:700}
 .label{font-size:13px;color:var(--sub)}
 .big{font-size:84px;font-weight:800;letter-spacing:-2px;line-height:1.05;margin:6px 0 0;font-variant-numeric:tabular-nums}
 .big small{font-size:28px;font-weight:700;margin-left:4px;letter-spacing:0;color:var(--sub)}
+.bmi{margin-top:6px;font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.bmi .cat{font-size:13px;font-weight:600;color:var(--sub);margin-left:8px}
+.bmi-link{margin-top:8px;border:none;background:none;color:var(--accent);font-size:13px;font-family:inherit;padding:4px}
+.seg{display:flex;gap:8px}
+.seg label{flex:1;text-align:center;border:1px solid var(--line);border-radius:12px;padding:11px 4px;font-size:14px;cursor:pointer}
+.seg input{display:none}
+.seg input:checked+span{color:var(--accent);font-weight:700}
+.seg label:has(input:checked){border-color:var(--accent);background:rgba(31,138,112,.10)}
+.btn.sm{padding:16px 14px;font-size:15px}
 .delta{margin-top:8px;font-size:14px;color:var(--sub)}
 .delta b.down{color:var(--accent)} .delta b.up{color:var(--warn)}
 .hint{margin-top:16px;font-size:12px;color:var(--sub)}
@@ -51,6 +60,10 @@ svg text{fill:var(--sub);font-size:10px}
 .goal-top{display:flex;justify-content:space-between;align-items:baseline}
 .goal-main{font-size:20px;font-weight:700}
 .goal-main em{font-style:normal;color:var(--goal);font-size:26px}
+.goal-kcal{margin-top:10px;font-size:18px;font-weight:700;color:var(--accent)}
+.goal-kcal em{font-style:normal;font-size:24px}
+.goal-kcal .sub{display:block;font-size:12px;font-weight:500;color:var(--sub);margin-top:2px}
+.goal-kcal .warn{color:var(--warn)}
 .goal-edit{border:none;background:none;color:var(--accent);font-size:13px;padding:4px 0}
 .bar{height:10px;background:var(--line);border-radius:6px;margin-top:12px;overflow:hidden}
 .bar>div{height:100%;background:var(--accent);border-radius:6px;width:0;transition:width .4s}
@@ -108,6 +121,7 @@ svg text{fill:var(--sub);font-size:10px}
       <section class="slide main">
         <div class="label">現在の体重</div>
         <div class="big" id="bigWeight">--<small>kg</small></div>
+        <div class="bmi" id="bmi"></div>
         <div class="delta" id="delta"></div>
         <div class="hint">← 数値を左にスワイプでグラフ</div>
       </section>
@@ -127,6 +141,7 @@ svg text{fill:var(--sub);font-size:10px}
       <div class="goal-main" id="goalMain">目標を設定しましょう</div>
       <button class="goal-edit" id="goalEdit">目標を設定</button>
     </div>
+    <div class="goal-kcal" id="goalKcal"></div>
     <div class="bar"><div id="goalBar"></div></div>
     <div class="goal-sub"><span id="goalStart"></span><span id="goalTarget"></span></div>
   </div>
@@ -138,8 +153,9 @@ svg text{fill:var(--sub);font-size:10px}
 </div>
 
 <div class="dock">
-  <button class="btn ghost" id="manualBtn">手入力</button>
-  <button class="btn primary" id="camBtn">📷 体重計を撮影</button>
+  <button class="btn ghost sm" id="manualBtn">手入力</button>
+  <button class="btn primary" id="camBtn">📷 撮影</button>
+  <button class="btn ghost sm" id="profileBtn">個人設定</button>
 </div>
 <!-- ② カメラ起動(スマホではこの入力でカメラが開く) -->
 <input type="file" id="cam" accept="image/*" capture="environment" hidden>
@@ -160,11 +176,32 @@ svg text{fill:var(--sub);font-size:10px}
   </div>
 </div>
 
+<!-- 個人設定 -->
+<div class="modal" id="profileModal">
+  <div class="sheet">
+    <h3>個人設定</h3>
+    <div class="field"><label>性別</label>
+      <div class="seg" id="sexSeg">
+        <label><input type="radio" name="sex" value="male"><span>男性</span></label>
+        <label><input type="radio" name="sex" value="female"><span>女性</span></label>
+        <label><input type="radio" name="sex" value="other"><span>回答しない</span></label>
+      </div>
+    </div>
+    <div class="field"><label>身長 (cm)</label><input id="heightInput" type="number" inputmode="decimal" step="0.1" min="100" max="250"></div>
+    <div class="field"><label>年齢</label><input id="ageInput" type="number" inputmode="numeric" step="1" min="1" max="120"></div>
+    <div class="btns">
+      <button class="btn ghost" id="profileCancel">閉じる</button>
+      <button class="btn primary" id="profileSave">保存</button>
+    </div>
+  </div>
+</div>
+
 <!-- 目標設定 -->
 <div class="modal" id="goalModal">
   <div class="sheet">
     <h3>目標体重</h3>
     <div class="field"><label>目標体重 (kg)</label><input id="goalInput" type="number" inputmode="decimal" step="0.1" min="20" max="300"></div>
+    <div class="field"><label>いつまでに？（カレンダーから選択）</label><input id="goalDateInput" type="date"></div>
     <div class="btns">
       <button class="btn ghost" id="goalCancel">閉じる</button>
       <button class="btn primary" id="goalSave">保存</button>
@@ -178,11 +215,11 @@ svg text{fill:var(--sub);font-size:10px}
 const $=id=>document.getElementById(id);
 const KEY='weightApp.v1';
 const CLOTHES_KG=1.0;
-let state={records:[],goal:null};
+let state={records:[],goal:null,goalDate:null,profile:{sex:'',height:null,age:null}};
 let range=30;
 
 /* ---------- 保存 ---------- */
-function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.records))state=s;}catch(e){}}
+function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.records)){state=s;if(!state.profile)state.profile={sex:'',height:null,age:null};}}catch(e){}}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}}
 const sorted=()=>state.records.slice().sort((a,b)=>a.ts-b.ts);
 const r1=v=>Math.round(v*10)/10;
@@ -199,17 +236,30 @@ function render(){
     const cls=d<0?'down':d>0?'up':'';
     $('delta').innerHTML='前回比 <b class="'+cls+'">'+(d>0?'+':'')+d.toFixed(1)+' kg</b>';
   }else{ $('delta').textContent=last?(fmtFull(last.ts)+' 記録'):'まだ記録がありません'; }
+  renderBmi(last);
   renderGoal(recs);
   renderChart(recs);
   renderRows(recs);
 }
 
+const KCAL_PER_KG=7200; // 体脂肪1kgあたりの目安
+const pad2=n=>String(n).padStart(2,'0');
+const ymd=d=>d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+function daysLeft(str){ // 今日から期限日までの日数(今日=0)
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(str||'');if(!m)return null;
+  const end=new Date(+m[1],+m[2]-1,+m[3]),n=new Date(),today=new Date(n.getFullYear(),n.getMonth(),n.getDate());
+  return Math.round((end-today)/864e5);
+}
 function renderGoal(recs){
   const g=state.goal, last=recs[recs.length-1];
-  const main=$('goalMain'), bar=$('goalBar');
+  const main=$('goalMain'), bar=$('goalBar'), kc=$('goalKcal');
+  kc.innerHTML='';
   $('goalEdit').textContent=g==null?'目標を設定':'変更';
   if(g==null){main.textContent='目標を設定しましょう';bar.style.width='0';$('goalStart').textContent='';$('goalTarget').textContent='';return;}
-  $('goalTarget').textContent='目標 '+g.toFixed(1)+' kg';
+  const dl=daysLeft(state.goalDate);
+  let tgt='目標 '+g.toFixed(1)+' kg';
+  if(dl!=null){const p=state.goalDate.split('-');tgt+=' ・ '+(+p[1])+'/'+(+p[2])+'まで';}
+  $('goalTarget').textContent=tgt;
   if(!last){main.textContent='目標 '+g.toFixed(1)+' kg';bar.style.width='0';$('goalStart').textContent='';return;}
   const start=recs[0].kg, diff=r1(last.kg-g);
   $('goalStart').textContent='開始 '+start.toFixed(1)+' kg';
@@ -219,6 +269,18 @@ function renderGoal(recs){
   let pct=total===0?0:(last.kg-start)/total*100;
   pct=Math.max(0,Math.min(100,pct));
   bar.style.width=pct+'%';
+  // あと◯◯kcal
+  const kcal=Math.round(Math.abs(diff)*KCAL_PER_KG), verb=diff>0?'消費':'摂取';
+  let h='あと <em>'+kcal.toLocaleString('ja-JP')+'</em> kcal '+verb+'！';
+  if(dl!=null){
+    if(dl<0){h+='<span class="sub">期限を過ぎています。日付を見直してみましょう</span>';}
+    else{
+      const days=Math.max(1,dl), per=Math.round(kcal/days);
+      h+='<span class="sub">'+(dl===0?'今日が期限です':'残り '+dl+' 日')+' ・ 1日あたり約 '+per.toLocaleString('ja-JP')+' kcal</span>';
+      if(diff>0&&per>1000)h+='<span class="sub warn">1日1,000kcal以上は負担が大きめです。期限を延ばすのがおすすめです</span>';
+    }
+  }
+  kc.innerHTML=h;
 }
 
 function renderChart(all){
@@ -416,15 +478,45 @@ function parseWeight(t){
   return ok.length?ok[0]:null;
 }
 
+/* ---------- BMI・個人設定 ---------- */
+function bmiCat(b){return b<18.5?'低体重':b<25?'普通体重':b<30?'肥満(1度)':b<35?'肥満(2度)':b<40?'肥満(3度)':'肥満(4度)';}
+function renderBmi(last){
+  const box=$('bmi'),h=state.profile&&state.profile.height;
+  if(!h){box.innerHTML='<button class="bmi-link" id="bmiSet">身長を設定するとBMIを表示します</button>';
+    $('bmiSet').addEventListener('click',openProfile);return;}
+  if(!last){box.textContent='';return;}
+  const m=h/100,b=last.kg/(m*m);
+  box.innerHTML='BMI '+b.toFixed(1)+'<span class="cat">'+bmiCat(b)+'</span>';
+}
+function openProfile(){
+  const p=state.profile||{};
+  document.querySelectorAll('input[name=sex]').forEach(r=>{r.checked=(r.value===p.sex);});
+  $('heightInput').value=p.height==null?'':p.height;
+  $('ageInput').value=p.age==null?'':p.age;
+  $('profileModal').classList.add('show');
+}
+$('profileBtn').addEventListener('click',openProfile);
+$('profileCancel').addEventListener('click',()=>$('profileModal').classList.remove('show'));
+$('profileSave').addEventListener('click',()=>{
+  const sx=document.querySelector('input[name=sex]:checked');
+  const h=parseFloat($('heightInput').value),a=parseInt($('ageInput').value,10);
+  state.profile={sex:sx?sx.value:'',height:(h>=100&&h<=250)?r1(h):null,age:(a>=1&&a<=120)?a:null};
+  save();$('profileModal').classList.remove('show');render();
+});
+
 /* ---------- ③ 目標 ---------- */
 $('goalEdit').addEventListener('click',()=>{
   $('goalInput').value=state.goal==null?'':state.goal.toFixed(1);
+  $('goalDateInput').min=ymd(new Date());
+  $('goalDateInput').value=state.goalDate||'';
   $('goalModal').classList.add('show');
 });
 $('goalCancel').addEventListener('click',()=>$('goalModal').classList.remove('show'));
 $('goalSave').addEventListener('click',()=>{
   const v=parseFloat($('goalInput').value);
   state.goal=(v>=20&&v<=300)?r1(v):null;
+  const gd=$('goalDateInput').value;
+  state.goalDate=(state.goal!=null&&/^\d{4}-\d{2}-\d{2}$/.test(gd))?gd:null;
   save();$('goalModal').classList.remove('show');render();
 });
 
